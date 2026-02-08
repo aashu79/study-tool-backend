@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",       /* Specify ECMAScript target version */
+    "module": "CommonJS",     /* Specify module code generation */
+    "strict": true,           /* Enable all strict type-checking options */
+    "outDir": "./dist",       /* Redirect output structure to the directory */
+    "rootDir": "./src",       /* Specify the root directory of input files */
+    "esModuleInterop": true,  /* Enables compatibility with CommonJS modules */
+    "skipLibCheck": true,     /* Skip type checking of declaration files */
+    "forceConsistentCasingInFileNames": true /* Disallow inconsistently-cased references */
+  },
+  "include": ["src/**/*"],     /* Specifies which files TypeScript should compile */
+  "exclude": ["node_modules"]  /* Specifies files/directories to exclude */
+}

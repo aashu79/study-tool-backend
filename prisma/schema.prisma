@@ -1,0 +1,240 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id             String        @id @default(uuid())
+  email          String        @unique
+  password_hash  String
+  full_name      String
+  educationLevel String
+  profilePicture String? // URL or key for profile image
+  created_at     DateTime      @default(now())
+  last_login     DateTime?
+  isVerified     Boolean       @default(false)
+  otp            OTP?
+  files          File[]
+  summaries      Summary[]
+  quizzes        Quiz[]
+  quizAttempts   QuizAttempt[]
+  quizInsights   QuizInsight[]
+
+  @@map("users")
+}
+
+model OTP {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  otp       String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("otps")
+}
+
+model File {
+  id               String              @id @default(uuid())
+  userId           String
+  user             User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key              String // MinIO object key
+  filename         String
+  mimetype         String
+  size             Int
+  processingStatus ProcessingStatus    @default(PENDING)
+  errorMessage     String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @default(now()) @updatedAt
+  chunks           DocumentChunk[]
+  processingJobs   FileProcessingJob[]
+  summaries        Summary[]
+  quizzes          Quiz[]
+
+  @@map("files")
+}
+
+enum ProcessingStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model FileProcessingJob {
+  id           String           @id @default(uuid())
+  fileId       String
+  file         File             @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  status       ProcessingStatus @default(PENDING)
+  attempts     Int              @default(0)
+  maxAttempts  Int              @default(3)
+  errorMessage String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@map("file_processing_jobs")
+}
+
+model DocumentChunk {
+  id         String   @id @default(uuid())
+  fileId     String
+  file       File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  chunkIndex Int
+  pageStart  Int?
+  pageEnd    Int?
+  content    String   @db.Text
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([fileId])
+  @@map("document_chunks")
+}
+
+model Summary {
+  id         String         @id @default(uuid())
+  fileId     String
+  file       File           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title      String
+  content    String         @db.Text
+  wordCount  Int
+  tokensUsed Int            @default(0)
+  modelUsed  String         @default("qwen/qwen3-32b")
+  chunks     SummaryChunk[]
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@index([fileId])
+  @@index([userId])
+  @@map("summaries")
+}
+
+model SummaryChunk {
+  id        String   @id @default(uuid())
+  summaryId String
+  summary   Summary  @relation(fields: [summaryId], references: [id], onDelete: Cascade)
+  chunkId   String
+  createdAt DateTime @default(now())
+
+  @@index([summaryId])
+  @@index([chunkId])
+  @@map("summary_chunks")
+}
+
+enum QuizDifficulty {
+  EASY
+  MEDIUM
+  HARD
+  MIXED
+}
+
+model Quiz {
+  id                 String         @id @default(uuid())
+  fileId             String
+  file               File           @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId             String
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title              String
+  specialInstruction String?        @db.Text
+  difficulty         QuizDifficulty @default(MEDIUM)
+  questionCount      Int
+  modelUsed          String         @default("qwen/qwen3-32b")
+  questions          QuizQuestion[]
+  attempts           QuizAttempt[]
+  insights           QuizInsight[]
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([fileId])
+  @@index([userId])
+  @@map("quizzes")
+}
+
+model QuizQuestion {
+  id                 String              @id @default(uuid())
+  quizId             String
+  quiz               Quiz                @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  questionIndex      Int
+  questionText       String              @db.Text
+  options            Json
+  correctOptionIndex Int
+  explanation        String?             @db.Text
+  createdAt          DateTime            @default(now())
+  answers            QuizAttemptAnswer[]
+
+  @@unique([quizId, questionIndex])
+  @@index([quizId])
+  @@map("quiz_questions")
+}
+
+model QuizAttempt {
+  id             String              @id @default(uuid())
+  quizId         String
+  quiz           Quiz                @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  score          Int
+  totalQuestions Int
+  correctAnswers Int
+  percentage     Float
+  answers        QuizAttemptAnswer[]
+  insight        QuizInsight?
+  createdAt      DateTime            @default(now())
+
+  @@index([quizId])
+  @@index([userId])
+  @@map("quiz_attempts")
+}
+
+model QuizAttemptAnswer {
+  id                  String       @id @default(uuid())
+  attemptId           String
+  attempt             QuizAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId          String
+  question            QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selectedOptionIndex Int
+  isCorrect           Boolean
+  createdAt           DateTime     @default(now())
+
+  @@unique([attemptId, questionId])
+  @@index([questionId])
+  @@map("quiz_attempt_answers")
+}
+
+model QuizInsight {
+  id                 String      @id @default(uuid())
+  attemptId          String      @unique
+  attempt            QuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  quizId             String
+  quiz               Quiz        @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  userId             String
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strengths          String      @db.Text
+  weaknesses         String      @db.Text
+  weakAreas          Json?
+  detailedInsights   String      @db.Text
+  recommendedActions String      @db.Text
+  modelUsed          String      @default("qwen/qwen3-32b")
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  @@index([quizId])
+  @@index([userId])
+  @@map("quiz_insights")
+}
+
+// --- TEMPORARY: to resolve drift ---
+enum processingstatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
