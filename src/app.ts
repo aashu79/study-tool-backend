@@ -5,6 +5,7 @@ import processingRoutes from "./routes/processing.routes";
 import summaryRoutes from "./routes/summary.routes";
 import quizRoutes from "./routes/quiz.routes";
 import flashcardRoutes from "./routes/flashcard.routes";
+import studySessionRoutes from "./routes/studySession.routes";
 
 import { errorHandler } from "./middleware/errorHandler.middleware";
 import dotenv from "dotenv";
@@ -50,6 +51,7 @@ app.use("/api/processing", processingRoutes);
 app.use("/api/summary", summaryRoutes);
 app.use("/api/quiz", quizRoutes);
 app.use("/api/flashcards", flashcardRoutes);
+app.use("/api/study-sessions", studySessionRoutes);
 
 // 404 handler for all unmatched routes
 app.use((req, res, next) => {

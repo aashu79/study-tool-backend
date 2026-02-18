@@ -23,6 +23,7 @@ model User {
   quizAttempts   QuizAttempt[]
   quizInsights   QuizInsight[]
   flashcardSets  FlashcardSet[]
+  studySessions  StudySession[]
 
   @@map("users")
 }
@@ -57,6 +58,7 @@ model File {
   summaries        Summary[]
   quizzes          Quiz[]
   flashcardSets    FlashcardSet[]
+  studySessions    StudySession[]
 
   @@map("files")
 }
@@ -148,6 +150,31 @@ enum FlashcardType {
   APPLICATION
 }
 
+enum StudySessionStatus {
+  ACTIVE
+  COMPLETED
+  INCOMPLETE
+}
+
+enum StudyEventType {
+  SESSION_STARTED
+  SESSION_ENDED
+  VIEW_SUMMARY
+  OPEN_FLASHCARD
+  START_QUIZ
+  SUBMIT_QUIZ
+  ANSWER_QUESTION
+  CUSTOM_ACTIVITY
+}
+
+enum DistractionType {
+  TAB_SWITCH
+  WINDOW_BLUR
+  INACTIVITY_TIMEOUT
+  APP_BACKGROUND
+  OTHER
+}
+
 model Quiz {
   id                 String         @id @default(uuid())
   fileId             String
@@ -193,6 +220,8 @@ model QuizAttempt {
   quiz           Quiz                @relation(fields: [quizId], references: [id], onDelete: Cascade)
   userId         String
   user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionId      String?
+  session        StudySession?       @relation(fields: [sessionId], references: [id], onDelete: SetNull)
   score          Int
   totalQuestions Int
   correctAnswers Int
@@ -203,6 +232,7 @@ model QuizAttempt {
 
   @@index([quizId])
   @@index([userId])
+  @@index([sessionId])
   @@map("quiz_attempts")
 }
 
@@ -281,6 +311,59 @@ model Flashcard {
   @@unique([setId, cardIndex])
   @@index([setId])
   @@map("flashcards")
+}
+
+model StudySession {
+  id                String               @id @default(uuid())
+  userId            String
+  user              User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileId            String
+  file              File                 @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  sessionStart      DateTime             @default(now())
+  sessionEnd        DateTime?
+  status            StudySessionStatus   @default(ACTIVE)
+  focusTimeSeconds  Int                  @default(0)
+  idleTimeSeconds   Int                  @default(0)
+  distractionCount  Int                  @default(0)
+  events            StudyEvent[]
+  distractions      DistractionEvent[]
+  quizAttempts      QuizAttempt[]
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@index([userId])
+  @@index([fileId])
+  @@index([status])
+  @@map("study_sessions")
+}
+
+model StudyEvent {
+  id        String         @id @default(uuid())
+  sessionId String
+  session   StudySession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  eventType StudyEventType
+  eventData Json?
+  timestamp DateTime       @default(now())
+
+  @@index([sessionId])
+  @@index([eventType])
+  @@index([timestamp])
+  @@map("study_events")
+}
+
+model DistractionEvent {
+  id              String           @id @default(uuid())
+  sessionId       String
+  session         StudySession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  distractionType DistractionType
+  durationSeconds Int              @default(0)
+  metadata        Json?
+  timestamp       DateTime         @default(now())
+
+  @@index([sessionId])
+  @@index([distractionType])
+  @@index([timestamp])
+  @@map("distraction_events")
 }
 
 // --- TEMPORARY: to resolve drift ---

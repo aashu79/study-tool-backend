@@ -96,6 +96,9 @@ export async function submitQuiz(req: Request, res: Response) {
       quizId,
       (req as any).user,
       req.body?.answers || [],
+      {
+        sessionId: req.body?.sessionId,
+      },
     );
 
     return res.status(201).json({

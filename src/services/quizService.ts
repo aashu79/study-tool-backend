@@ -1,6 +1,6 @@
 import axios from "axios";
 import OpenAI from "openai";
-import { Prisma, QuizDifficulty } from "@prisma/client";
+import { Prisma, QuizDifficulty, StudyEventType } from "@prisma/client";
 import prisma from "../lib/prismaClient";
 
 const WORKER_BASE_URL = process.env.WORKER_BASE_URL || "http://localhost:8000";
@@ -63,6 +63,10 @@ export interface CreateQuizInput {
 export interface QuizAnswerInput {
   questionId: string;
   selectedOptionIndex: number;
+}
+
+export interface SubmitQuizOptions {
+  sessionId?: string;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -791,6 +795,7 @@ export async function submitQuizResponses(
   quizId: string,
   authUser: any,
   answers: QuizAnswerInput[],
+  options?: SubmitQuizOptions,
 ) {
   const userId = getUserId(authUser);
   if (!userId) {
@@ -822,6 +827,34 @@ export async function submitQuizResponses(
 
   if (quiz.userId !== userId) {
     throw new Error("Unauthorized access to quiz");
+  }
+
+  let linkedSessionId: string | undefined;
+  if (options?.sessionId) {
+    const session = await prisma.studySession.findUnique({
+      where: { id: options.sessionId },
+      select: {
+        id: true,
+        userId: true,
+        fileId: true,
+      },
+    });
+
+    if (!session) {
+      throw new Error("Study session not found");
+    }
+
+    if (session.userId !== userId) {
+      throw new Error("Unauthorized access to study session");
+    }
+
+    if (session.fileId !== quiz.fileId) {
+      throw new Error(
+        "Study session does not match the document used for this quiz",
+      );
+    }
+
+    linkedSessionId = session.id;
   }
 
   if (answers.length !== quiz.questions.length) {
@@ -889,6 +922,7 @@ export async function submitQuizResponses(
     data: {
       quizId,
       userId,
+      ...(linkedSessionId ? { sessionId: linkedSessionId } : {}),
       score,
       totalQuestions,
       correctAnswers,
@@ -976,6 +1010,30 @@ export async function submitQuizResponses(
       modelUsed: GROQ_MODEL,
     },
   });
+
+  if (linkedSessionId) {
+    try {
+      await prisma.studyEvent.create({
+        data: {
+          sessionId: linkedSessionId,
+          eventType: StudyEventType.SUBMIT_QUIZ,
+          eventData: {
+            quizId,
+            attemptId: attempt.id,
+            score,
+            totalQuestions,
+            correctAnswers,
+            percentage,
+          },
+        },
+      });
+    } catch (error: any) {
+      console.warn(
+        "[QuizService] Failed to write session quiz event:",
+        error.message,
+      );
+    }
+  }
 
   return {
     attemptId: attempt.id,
