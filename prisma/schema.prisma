@@ -7,21 +7,22 @@ datasource db {
 }
 
 model User {
-  id             String        @id @default(uuid())
-  email          String        @unique
+  id             String         @id @default(uuid())
+  email          String         @unique
   password_hash  String
   full_name      String
   educationLevel String
   profilePicture String? // URL or key for profile image
-  created_at     DateTime      @default(now())
+  created_at     DateTime       @default(now())
   last_login     DateTime?
-  isVerified     Boolean       @default(false)
+  isVerified     Boolean        @default(false)
   otp            OTP?
   files          File[]
   summaries      Summary[]
   quizzes        Quiz[]
   quizAttempts   QuizAttempt[]
   quizInsights   QuizInsight[]
+  flashcardSets  FlashcardSet[]
 
   @@map("users")
 }
@@ -55,6 +56,7 @@ model File {
   processingJobs   FileProcessingJob[]
   summaries        Summary[]
   quizzes          Quiz[]
+  flashcardSets    FlashcardSet[]
 
   @@map("files")
 }
@@ -134,6 +136,16 @@ enum QuizDifficulty {
   MEDIUM
   HARD
   MIXED
+}
+
+enum FlashcardType {
+  DEFINITION
+  FORMULA
+  CONCEPT
+  PROCESS
+  EXAMPLE
+  COMPARISON
+  APPLICATION
 }
 
 model Quiz {
@@ -229,6 +241,46 @@ model QuizInsight {
   @@index([quizId])
   @@index([userId])
   @@map("quiz_insights")
+}
+
+model FlashcardSet {
+  id                    String      @id @default(uuid())
+  fileId                String
+  file                  File        @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId                String
+  user                  User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title                 String
+  description           String?     @db.Text
+  focusAreas            Json?
+  generationInstruction String?     @db.Text
+  cardCount             Int
+  modelUsed             String      @default("qwen/qwen3-32b")
+  cards                 Flashcard[]
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  @@index([fileId])
+  @@index([userId])
+  @@map("flashcard_sets")
+}
+
+model Flashcard {
+  id        String        @id @default(uuid())
+  setId     String
+  set       FlashcardSet  @relation(fields: [setId], references: [id], onDelete: Cascade)
+  cardIndex Int
+  front     String        @db.Text
+  back      String        @db.Text
+  hint      String?       @db.Text
+  topic     String?
+  tags      Json?
+  type      FlashcardType @default(CONCEPT)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@unique([setId, cardIndex])
+  @@index([setId])
+  @@map("flashcards")
 }
 
 // --- TEMPORARY: to resolve drift ---

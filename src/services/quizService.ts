@@ -40,8 +40,14 @@ interface GeneratedInsightResponse {
   strengths?: string;
   weaknesses?: string;
   weakAreas?: unknown;
-  detailedInsights?: string;
-  recommendedActions?: string;
+  detailedInsights?: unknown;
+  recommendedActions?: unknown;
+}
+
+interface InsightSourceReference {
+  refId: string;
+  pageStart: number | null;
+  excerpt: string;
 }
 
 export interface CreateQuizInput {
@@ -135,10 +141,76 @@ function normalizeQuestion(
 }
 
 function parseWeakAreas(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => String(item ?? "").trim())
-    .filter((item) => item.length > 0);
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter((item) => item.length > 0);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(/[\n,;|]/g)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+
+  if (value && typeof value === "object") {
+    const candidate = (value as Record<string, unknown>).topics;
+    if (candidate) return parseWeakAreas(candidate);
+  }
+
+  return [];
+}
+
+function toStudyReportText(value: unknown): string {
+  if (typeof value === "string") {
+    return value.trim();
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter((item) => item.length > 0)
+      .map((item) => `- ${item}`)
+      .join("\n");
+  }
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return "";
+
+    return entries
+      .map(([key, sectionValue]) => {
+        const heading = key
+          .replace(/([A-Z])/g, " $1")
+          .replace(/_/g, " ")
+          .trim();
+
+        const body = toStudyReportText(sectionValue);
+        if (!body) return "";
+
+        return `### ${heading}\n${body}`;
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  return String(value ?? "").trim();
+}
+
+function deriveWeakAreasFromResponses(
+  responses: Array<{ questionText: string; isCorrect: boolean }>,
+): string[] {
+  return responses
+    .filter((response) => !response.isCorrect)
+    .map((response) =>
+      response.questionText
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 120),
+    )
+    .filter((item) => item.length > 0)
+    .slice(0, 6);
 }
 
 function optionsFromJson(jsonValue: Prisma.JsonValue): string[] {
@@ -175,10 +247,17 @@ async function getQuizSourceContent(
 ) {
   if (useVectorSearch) {
     try {
-      const chunks = await retrieveChunksFromWorker(fileId, searchQuery, chunkLimit);
+      const chunks = await retrieveChunksFromWorker(
+        fileId,
+        searchQuery,
+        chunkLimit,
+      );
       if (chunks.length > 0) return chunks;
     } catch (error: any) {
-      console.warn("[QuizService] Vector retrieval failed, using DB chunks:", error.message);
+      console.warn(
+        "[QuizService] Vector retrieval failed, using DB chunks:",
+        error.message,
+      );
     }
   }
 
@@ -197,6 +276,115 @@ async function getQuizSourceContent(
     chunkId: chunk.id,
     content: chunk.content,
     pageStart: chunk.pageStart,
+  }));
+}
+
+function formatInsightSourceReferences(
+  references: InsightSourceReference[],
+): string {
+  if (references.length === 0) {
+    return "No source references were retrieved from the document.";
+  }
+
+  return references
+    .map((reference) => {
+      const pageLabel =
+        reference.pageStart !== null ? `Page ${reference.pageStart}` : "No page";
+      return `[${reference.refId} | ${pageLabel}]\n${reference.excerpt}`;
+    })
+    .join("\n\n");
+}
+
+async function collectInsightSourceReferences(input: {
+  fileId: string;
+  responses: Array<{
+    questionText: string;
+    isCorrect: boolean;
+    selectedOption: string;
+    correctOption: string;
+  }>;
+}) {
+  const incorrectResponses = input.responses
+    .filter((response) => !response.isCorrect)
+    .slice(0, 6);
+
+  if (incorrectResponses.length === 0) {
+    return [] as InsightSourceReference[];
+  }
+
+  let retrieved: RetrievedChunk[] = [];
+  try {
+    const grouped = await Promise.all(
+      incorrectResponses.map((response) =>
+        retrieveChunksFromWorker(
+          input.fileId,
+          `${response.questionText}\nStudent answer: ${response.selectedOption}\nCorrect answer: ${response.correctOption}`,
+          3,
+        ).catch(() => []),
+      ),
+    );
+    retrieved = grouped.flat();
+  } catch (error: any) {
+    console.warn(
+      "[QuizService] Failed to retrieve insight source chunks from worker:",
+      error.message,
+    );
+  }
+
+  if (retrieved.length === 0) {
+    const keywordList = incorrectResponses
+      .flatMap((response) =>
+        response.questionText
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, " ")
+          .split(/\s+/g),
+      )
+      .filter((token) => token.length >= 5)
+      .slice(0, 12);
+
+    const uniqueKeywords = Array.from(new Set(keywordList));
+
+    const fallbackChunks = await prisma.documentChunk.findMany({
+      where: {
+        fileId: input.fileId,
+        ...(uniqueKeywords.length > 0
+          ? {
+              OR: uniqueKeywords.map((keyword) => ({
+                content: { contains: keyword, mode: "insensitive" },
+              })),
+            }
+          : {}),
+      },
+      orderBy: { chunkIndex: "asc" },
+      take: 16,
+      select: {
+        id: true,
+        content: true,
+        pageStart: true,
+      },
+    });
+
+    retrieved = fallbackChunks.map((chunk) => ({
+      chunkId: chunk.id,
+      content: chunk.content,
+      pageStart: chunk.pageStart,
+    }));
+  }
+
+  const deduped: RetrievedChunk[] = [];
+  const seen = new Set<string>();
+
+  for (const chunk of retrieved) {
+    if (!chunk.content || seen.has(chunk.chunkId)) continue;
+    seen.add(chunk.chunkId);
+    deduped.push(chunk);
+    if (deduped.length >= 10) break;
+  }
+
+  return deduped.map((chunk, index) => ({
+    refId: `S${index + 1}`,
+    pageStart: chunk.pageStart,
+    excerpt: chunk.content.replace(/\s+/g, " ").slice(0, 700),
   }));
 }
 
@@ -277,6 +465,7 @@ Output JSON format:
 }
 
 async function generateInsightsWithAi(input: {
+  fileName: string;
   quizTitle: string;
   difficulty: QuizDifficulty;
   totalQuestions: number;
@@ -289,16 +478,24 @@ async function generateInsightsWithAi(input: {
     correctOption: string;
     explanation?: string | null;
   }>;
+  sourceReferences: InsightSourceReference[];
 }) {
   const systemPrompt = `
-You are an expert academic coach.
-Analyze quiz performance and provide detailed, actionable insights.
-Return only valid JSON and no markdown.
+You are an expert learning diagnostician and academic coach.
+Your job is to convert quiz performance into an explicit remediation plan grounded in the source document.
+You must:
+- Diagnose exact misconceptions behind wrong answers
+- Identify what to study next with concrete concepts, definitions, formulas, and procedures
+- Prioritize weak areas by impact
+- Use source references (S1, S2...) as evidence whenever possible
+
+Return only valid JSON and no markdown wrappers.
 `;
 
   const userPrompt = `
 Analyze this quiz attempt:
 
+Document: ${input.fileName}
 Quiz title: ${input.quizTitle}
 Difficulty: ${input.difficulty}
 Score: ${input.correctAnswers}/${input.totalQuestions} (${input.percentage}%)
@@ -306,13 +503,16 @@ Score: ${input.correctAnswers}/${input.totalQuestions} (${input.percentage}%)
 Responses:
 ${JSON.stringify(input.responses, null, 2)}
 
+Document source references:
+${formatInsightSourceReferences(input.sourceReferences)}
+
 Return JSON with this exact shape:
 {
-  "strengths": "Detailed paragraph",
-  "weaknesses": "Detailed paragraph",
+  "strengths": "At least 3-4 sentences with evidence from responses",
+  "weaknesses": "At least 4-6 sentences diagnosing where understanding breaks down",
   "weakAreas": ["topic 1", "topic 2"],
-  "detailedInsights": "Comprehensive analysis with patterns and reasoning",
-  "recommendedActions": "Detailed action plan for improvement"
+  "detailedInsights": "Detailed markdown-style report with sections: Overall diagnosis, Question-level misconceptions, Weak-concept map with source references, What exactly to study",
+  "recommendedActions": "Detailed markdown-style action plan with priorities: next session, next 3 days, next 7 days, and measurable success criteria"
 }
 `;
 
@@ -333,6 +533,9 @@ Return JSON with this exact shape:
   }
 
   const parsed = parseJsonFromAi<GeneratedInsightResponse>(rawContent);
+  const detailedInsights = toStudyReportText(parsed.detailedInsights);
+  const recommendedActions = toStudyReportText(parsed.recommendedActions);
+
   return {
     strengths:
       parsed.strengths?.trim() ||
@@ -342,11 +545,11 @@ Return JSON with this exact shape:
       "Some incorrect answers suggest gaps in core concepts and careful reading of question details.",
     weakAreas: parseWeakAreas(parsed.weakAreas),
     detailedInsights:
-      parsed.detailedInsights?.trim() ||
-      "Performance indicates mixed conceptual clarity. Review incorrect questions and reinforce weak concepts with targeted practice.",
+      detailedInsights ||
+      "### Overall diagnosis\nPerformance indicates mixed conceptual clarity with identifiable misconceptions in incorrect responses.\n\n### What exactly to study\nFocus on the concepts behind incorrect answers and rework each item until you can explain why the correct option is right and why your selected option is wrong.",
     recommendedActions:
-      parsed.recommendedActions?.trim() ||
-      "Re-study weak topics, create concise notes, and retake a focused quiz to measure improvement.",
+      recommendedActions ||
+      "### Next session\n- Review each incorrect question and write a one-line correction note.\n- Revisit definitions/formulas linked to weak topics.\n\n### Next 3 days\n- Practice targeted questions on weak topics.\n- Build concise revision notes.\n\n### Success criteria\n- Score at least 80% on a focused re-attempt.",
   };
 }
 
@@ -416,7 +619,8 @@ export async function createQuizFromFile(
 
   const combinedContent = chunks
     .map((chunk, index) => {
-      const page = chunk.pageStart !== null ? `Page ${chunk.pageStart}` : "No page";
+      const page =
+        chunk.pageStart !== null ? `Page ${chunk.pageStart}` : "No page";
       return `[Chunk ${index + 1} - ${page}]\n${chunk.content}`;
     })
     .join("\n\n");
@@ -434,7 +638,8 @@ export async function createQuizFromFile(
     content: contentForAi,
   });
 
-  const quizTitle = input.title?.trim() || aiQuiz.title || `Quiz on ${file.filename}`;
+  const quizTitle =
+    input.title?.trim() || aiQuiz.title || `Quiz on ${file.filename}`;
 
   const quiz = await prisma.quiz.create({
     data: {
@@ -599,6 +804,12 @@ export async function submitQuizResponses(
   const quiz = await prisma.quiz.findUnique({
     where: { id: quizId },
     include: {
+      file: {
+        select: {
+          id: true,
+          filename: true,
+        },
+      },
       questions: {
         orderBy: { questionIndex: "asc" },
       },
@@ -619,12 +830,16 @@ export async function submitQuizResponses(
     );
   }
 
-  const questionMap = new Map(quiz.questions.map((question) => [question.id, question]));
+  const questionMap = new Map(
+    quiz.questions.map((question) => [question.id, question]),
+  );
   const seenQuestionIds = new Set<string>();
 
   const evaluatedAnswers = answers.map((answer) => {
     if (!answer.questionId || typeof answer.selectedOptionIndex !== "number") {
-      throw new Error("Each answer must contain questionId and selectedOptionIndex");
+      throw new Error(
+        "Each answer must contain questionId and selectedOptionIndex",
+      );
     }
 
     if (seenQuestionIds.has(answer.questionId)) {
@@ -642,7 +857,9 @@ export async function submitQuizResponses(
       answer.selectedOptionIndex < 0 ||
       answer.selectedOptionIndex >= options.length
     ) {
-      throw new Error(`Selected option out of range for question ${question.id}`);
+      throw new Error(
+        `Selected option out of range for question ${question.id}`,
+      );
     }
 
     return {
@@ -659,7 +876,9 @@ export async function submitQuizResponses(
   }
 
   const totalQuestions = quiz.questions.length;
-  const correctAnswers = evaluatedAnswers.filter((answer) => answer.isCorrect).length;
+  const correctAnswers = evaluatedAnswers.filter(
+    (answer) => answer.isCorrect,
+  ).length;
   const score = correctAnswers;
   const percentage =
     totalQuestions === 0
@@ -693,19 +912,28 @@ export async function submitQuizResponses(
 
   let generatedInsights;
   try {
+    const responsePayload = evaluatedAnswers.map((answer) => ({
+      questionText: answer.question.questionText,
+      isCorrect: answer.isCorrect,
+      selectedOption: answer.selectedOption,
+      correctOption: answer.correctOption,
+      explanation: answer.question.explanation,
+    }));
+
+    const sourceReferences = await collectInsightSourceReferences({
+      fileId: quiz.fileId,
+      responses: responsePayload,
+    });
+
     generatedInsights = await generateInsightsWithAi({
+      fileName: quiz.file?.filename || "Unknown document",
       quizTitle: quiz.title,
       difficulty: quiz.difficulty,
       totalQuestions,
       correctAnswers,
       percentage,
-      responses: evaluatedAnswers.map((answer) => ({
-        questionText: answer.question.questionText,
-        isCorrect: answer.isCorrect,
-        selectedOption: answer.selectedOption,
-        correctOption: answer.correctOption,
-        explanation: answer.question.explanation,
-      })),
+      responses: responsePayload,
+      sourceReferences,
     });
   } catch (error: any) {
     console.error("[QuizService] Insight generation failed:", error.message);
@@ -720,6 +948,19 @@ export async function submitQuizResponses(
       recommendedActions:
         "Revise weak topics, practice targeted questions, and attempt another quiz with similar difficulty.",
     };
+  }
+
+  if (!Array.isArray(generatedInsights.weakAreas)) {
+    generatedInsights.weakAreas = [];
+  }
+
+  if (generatedInsights.weakAreas.length === 0) {
+    generatedInsights.weakAreas = deriveWeakAreasFromResponses(
+      evaluatedAnswers.map((answer) => ({
+        questionText: answer.question.questionText,
+        isCorrect: answer.isCorrect,
+      })),
+    );
   }
 
   const insight = await prisma.quizInsight.create({
