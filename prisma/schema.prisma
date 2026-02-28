@@ -325,6 +325,10 @@ model StudySession {
   focusTimeSeconds  Int                  @default(0)
   idleTimeSeconds   Int                  @default(0)
   distractionCount  Int                  @default(0)
+  reportEmailSentAt DateTime?
+  reportEmailLastAttemptAt DateTime?
+  reportEmailLastError String?           @db.Text
+  reportEmailSendCount Int               @default(0)
   events            StudyEvent[]
   distractions      DistractionEvent[]
   quizAttempts      QuizAttempt[]
@@ -334,6 +338,7 @@ model StudySession {
   @@index([userId])
   @@index([fileId])
   @@index([status])
+  @@index([status, reportEmailSentAt])
   @@map("study_sessions")
 }
 

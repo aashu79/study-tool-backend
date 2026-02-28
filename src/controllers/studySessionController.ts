@@ -9,6 +9,7 @@ import {
   getStudySessionReport,
   listStudySessions,
 } from "../services/studySessionService";
+import { sendStudySessionReportEmail } from "../services/studySessionReportEmailService";
 
 function statusCodeFromError(error: any): number {
   const message = String(error?.message || "").toLowerCase();
@@ -196,6 +197,38 @@ export async function getStudySessionReportController(
     return res.status(statusCodeFromError(error)).json({
       success: false,
       error: error.message || "Failed to get study session report",
+    });
+  }
+}
+
+export async function sendStudySessionReportEmailController(
+  req: Request,
+  res: Response,
+) {
+  try {
+    const { sessionId } = req.params;
+    const result = await sendStudySessionReportEmail(
+      sessionId,
+      (req as any).user,
+      {
+        force:
+          req.body?.force === true ||
+          req.body?.force === "true" ||
+          req.query?.force === "true",
+      },
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: result.alreadySent
+        ? "Study session report email was already sent"
+        : "Study session report email sent successfully",
+      data: result,
+    });
+  } catch (error: any) {
+    return res.status(statusCodeFromError(error)).json({
+      success: false,
+      error: error.message || "Failed to send study session report email",
     });
   }
 }

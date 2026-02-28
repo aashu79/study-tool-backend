@@ -8,6 +8,7 @@ import {
   listStudySessionsController,
   logDistractionEventController,
   logStudyEventController,
+  sendStudySessionReportEmailController,
   startStudySession,
 } from "../controllers/studySessionController";
 
@@ -43,6 +44,17 @@ router.get(
   "/:sessionId/report",
   authenticateToken,
   getStudySessionReportController,
+);
+
+/**
+ * @route   POST /api/study-sessions/:sessionId/report/email
+ * @desc    Send or resend a study session report email to the authenticated user
+ * @access  Private
+ */
+router.post(
+  "/:sessionId/report/email",
+  authenticateToken,
+  sendStudySessionReportEmailController,
 );
 
 /**

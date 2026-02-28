@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import nodemailer from "nodemailer";
 import prisma from "../lib/prismaClient";
+import { sendEmail } from "./mailerService";
 
 const JWT_SECRET = process.env.JWT_SECRET || "changeme";
 const OTP_EXPIRY_MINUTES = 10;
@@ -220,22 +220,13 @@ export async function loginUser({ email, password }: any) {
 }
 
 async function sendOTPEmail(email: string, otp: string, isReset = false) {
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.NODE_MAILER_EMAIL_ID,
-      pass: process.env.NODE_MAILER_AUTH_PASS,
-    },
-  });
-
   const template = buildOtpEmailTemplate({
     otp,
     isReset,
     expiresInMinutes: OTP_EXPIRY_MINUTES,
   });
 
-  await transporter.sendMail({
-    from: process.env.NODE_MAILER_EMAIL_ID,
+  await sendEmail({
     to: email,
     subject: template.subject,
     text: template.text,
