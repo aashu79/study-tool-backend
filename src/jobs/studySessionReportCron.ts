@@ -52,8 +52,7 @@ async function runStudySessionReportCronCycle() {
 }
 
 export function startStudySessionReportCron() {
-  const isEnabled =
-    process.env.STUDY_SESSION_REPORT_EMAIL_ENABLED !== "false";
+  const isEnabled = process.env.STUDY_SESSION_REPORT_EMAIL_ENABLED !== "false";
   if (!isEnabled || cronHandle) {
     return;
   }
@@ -68,7 +67,5 @@ export function startStudySessionReportCron() {
     void runStudySessionReportCronCycle();
   }, intervalMs);
 
-  console.log(
-    `[StudySessionReportCron] started with interval ${intervalMs}ms`,
-  );
+  console.log(`[StudySessionReportCron] started with interval ${intervalMs}ms`);
 }

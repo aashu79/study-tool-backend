@@ -5,6 +5,7 @@ import {
   StudySessionStatus,
 } from "@prisma/client";
 import prisma from "../lib/prismaClient";
+import { generateStudySessionReport } from "./aiService";
 
 interface AuthUser {
   id?: string;
@@ -236,10 +237,16 @@ function buildImprovementPlan(input: {
   const nextSessionChecklist: string[] = [];
 
   if (input.status === StudySessionStatus.COMPLETED) {
-    strengths.push("You finished the study session and captured a complete learning block.");
+    strengths.push(
+      "You finished the study session and captured a complete learning block.",
+    );
   } else {
-    risks.push("The session ended as incomplete, which may have reduced consolidation.");
-    recommendations.push("Close the next session with a short recap so the material is not left half-finished.");
+    risks.push(
+      "The session ended as incomplete, which may have reduced consolidation.",
+    );
+    recommendations.push(
+      "Close the next session with a short recap so the material is not left half-finished.",
+    );
   }
 
   const focusBand = getFocusBand(input.focusScore);
@@ -251,17 +258,23 @@ function buildImprovementPlan(input: {
     strengths.push(
       `Focus held up reasonably well (${input.focusScore.toFixed(2)}% focused time).`,
     );
-    recommendations.push("Push the next session slightly closer to deep-work mode by trimming avoidable interruptions.");
+    recommendations.push(
+      "Push the next session slightly closer to deep-work mode by trimming avoidable interruptions.",
+    );
   } else if (focusBand === "fair") {
     risks.push(
       `Focus was inconsistent (${input.focusScore.toFixed(2)}% focused time).`,
     );
-    recommendations.push("Use a fixed study block with a visible timer and avoid switching context mid-session.");
+    recommendations.push(
+      "Use a fixed study block with a visible timer and avoid switching context mid-session.",
+    );
   } else {
     risks.push(
       `Most of the session was lost to idle or off-task time (${input.idleTimeSeconds}s idle).`,
     );
-    recommendations.push("Shorten the next session to a tighter focus sprint and pause non-essential tabs or apps before starting.");
+    recommendations.push(
+      "Shorten the next session to a tighter focus sprint and pause non-essential tabs or apps before starting.",
+    );
   }
 
   if (input.distractionCount === 0) {
@@ -275,7 +288,9 @@ function buildImprovementPlan(input: {
     risks.push(
       `${input.distractionCount} distraction events interrupted the session.`,
     );
-    recommendations.push("Keep one study window open, mute notifications, and batch non-study checks for the break.");
+    recommendations.push(
+      "Keep one study window open, mute notifications, and batch non-study checks for the break.",
+    );
   }
 
   if (input.totalDurationSeconds >= 1500) {
@@ -283,7 +298,9 @@ function buildImprovementPlan(input: {
       `You sustained a meaningful study block (${formatDurationLabel(input.totalDurationSeconds)} total).`,
     );
   } else {
-    recommendations.push("Aim for at least 25 focused minutes so you have enough time to review and test recall.");
+    recommendations.push(
+      "Aim for at least 25 focused minutes so you have enough time to review and test recall.",
+    );
   }
 
   if (input.totalQuizAttempts > 0) {
@@ -295,12 +312,16 @@ function buildImprovementPlan(input: {
       risks.push(
         `Quiz performance was mixed (${input.averageQuizPercentage.toFixed(2)}% average).`,
       );
-      recommendations.push("Review the missed quiz concepts immediately after studying instead of leaving them for later.");
+      recommendations.push(
+        "Review the missed quiz concepts immediately after studying instead of leaving them for later.",
+      );
     } else {
       risks.push(
         `Quiz results show weak retention (${input.averageQuizPercentage.toFixed(2)}% average).`,
       );
-      recommendations.push("Re-read the weakest concepts and explain them in your own words before attempting another quiz.");
+      recommendations.push(
+        "Re-read the weakest concepts and explain them in your own words before attempting another quiz.",
+      );
     }
 
     if (input.aggregatedWeakAreas.length > 0) {
@@ -309,9 +330,15 @@ function buildImprovementPlan(input: {
       );
     }
   } else {
-    risks.push("No quiz was attempted, so recall was not checked during this session.");
-    recommendations.push("Finish the next session with a short quiz or self-test to confirm retention.");
-    nextSessionChecklist.push("Attempt a 5-10 question quiz before ending the next session.");
+    risks.push(
+      "No quiz was attempted, so recall was not checked during this session.",
+    );
+    recommendations.push(
+      "Finish the next session with a short quiz or self-test to confirm retention.",
+    );
+    nextSessionChecklist.push(
+      "Attempt a 5-10 question quiz before ending the next session.",
+    );
   }
 
   nextSessionChecklist.push(
@@ -589,7 +616,9 @@ export async function getStudySessionById(
   const userId = getUserId(authUser);
   const session = await ensureOwnedSession(sessionId, userId);
 
-  let events: Awaited<ReturnType<typeof prisma.studyEvent.findMany>> | undefined;
+  let events:
+    | Awaited<ReturnType<typeof prisma.studyEvent.findMany>>
+    | undefined;
   let distractions:
     | Awaited<ReturnType<typeof prisma.distractionEvent.findMany>>
     | undefined;
@@ -749,7 +778,10 @@ export async function endStudySession(
     throw new Error("sessionEnd cannot be before sessionStart");
   }
 
-  const totalDurationSeconds = toDurationSeconds(session.sessionStart, sessionEnd);
+  const totalDurationSeconds = toDurationSeconds(
+    session.sessionStart,
+    sessionEnd,
+  );
   const idleTimeSeconds = parseNonNegativeInteger(
     input.idleTimeSeconds,
     "idleTimeSeconds",
@@ -766,7 +798,9 @@ export async function endStudySession(
     input.focusTimeSeconds !== undefined &&
     idleTimeSeconds + focusTimeSeconds > totalDurationSeconds
   ) {
-    throw new Error("focusTimeSeconds + idleTimeSeconds cannot exceed session duration");
+    throw new Error(
+      "focusTimeSeconds + idleTimeSeconds cannot exceed session duration",
+    );
   }
 
   const updatedSession = await prisma.$transaction(async (tx) => {
@@ -844,166 +878,101 @@ export async function getStudySessionReport(
             strengths: true,
             weaknesses: true,
             weakAreas: true,
+            detailedInsights: true,
             recommendedActions: true,
             createdAt: true,
+          },
+        },
+        answers: {
+          orderBy: {
+            createdAt: "asc",
+          },
+          include: {
+            question: {
+              select: {
+                id: true,
+                questionText: true,
+                options: true,
+                correctOptionIndex: true,
+                explanation: true,
+              },
+            },
           },
         },
       },
     }),
   ]);
 
-  const endedAt = session.sessionEnd ?? new Date();
-  const totalDurationSeconds = toDurationSeconds(session.sessionStart, endedAt);
-  const distractionDurationSeconds = distractions.reduce(
-    (total, item) => total + item.durationSeconds,
-    0,
-  );
-  const idleTimeSeconds = Math.max(session.idleTimeSeconds, distractionDurationSeconds);
-  const focusTimeSeconds =
-    session.focusTimeSeconds > 0
-      ? session.focusTimeSeconds
-      : Math.max(0, totalDurationSeconds - idleTimeSeconds);
-
-  const distractionRatioPercentage =
-    totalDurationSeconds > 0
-      ? Number(((idleTimeSeconds / totalDurationSeconds) * 100).toFixed(2))
-      : 0;
-  const focusScore =
-    totalDurationSeconds > 0
-      ? Number(((focusTimeSeconds / totalDurationSeconds) * 100).toFixed(2))
-      : 0;
-
-  const eventBreakdown = events.reduce<Record<string, number>>((acc, item) => {
-    acc[item.eventType] = (acc[item.eventType] || 0) + 1;
-    return acc;
-  }, {});
-
-  const distractionBreakdown = distractions.reduce<Record<string, number>>(
-    (acc, item) => {
-      acc[item.distractionType] = (acc[item.distractionType] || 0) + 1;
-      return acc;
-    },
-    {},
-  );
-
-  const totalQuizAttempts = quizAttempts.length;
-  const averageQuizPercentage =
-    totalQuizAttempts > 0
-      ? Number(
-          (
-            quizAttempts.reduce((sum, item) => sum + item.percentage, 0) /
-            totalQuizAttempts
-          ).toFixed(2),
-        )
-      : 0;
-  const bestQuizPercentage =
-    totalQuizAttempts > 0
-      ? Number(
-          Math.max(...quizAttempts.map((attempt) => attempt.percentage)).toFixed(2),
-        )
-      : 0;
-  const quizAttempted = totalQuizAttempts > 0;
-  const weakAreaCounts = new Map<string, number>();
-
-  for (const attempt of quizAttempts) {
-    const weakAreas = parseStringList(attempt.insight?.weakAreas);
-    for (const weakArea of weakAreas) {
-      weakAreaCounts.set(weakArea, (weakAreaCounts.get(weakArea) || 0) + 1);
-    }
-  }
-
-  const aggregatedWeakAreas = Array.from(weakAreaCounts.entries())
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .map(([topic]) => topic);
-  const latestInsightWithActions =
-    quizAttempts.find((attempt) => attempt.insight)?.insight || null;
-  const latestRecommendedActions = parseActionLines(
-    latestInsightWithActions?.recommendedActions,
-  );
-  const improvement = buildImprovementPlan({
-    status: session.status,
-    totalDurationSeconds,
-    focusTimeSeconds,
-    idleTimeSeconds,
-    distractionCount: session.distractionCount,
-    distractionRatioPercentage,
-    focusScore: clamp(focusScore, 0, 100),
-    totalQuizAttempts,
-    averageQuizPercentage,
-    aggregatedWeakAreas,
-    latestRecommendedActions,
-  });
-
-  return {
+  const reportPayload = {
     session: {
       id: session.id,
       userId: session.userId,
       fileId: session.fileId,
       fileName: session.file.filename,
       status: session.status,
-      sessionStart: session.sessionStart,
-      sessionEnd: session.sessionEnd,
-      totalDurationSeconds,
-      focusTimeSeconds,
-      idleTimeSeconds,
+      sessionStart: session.sessionStart.toISOString(),
+      sessionEnd: session.sessionEnd?.toISOString() || null,
+      focusTimeSeconds: session.focusTimeSeconds,
+      idleTimeSeconds: session.idleTimeSeconds,
       distractionCount: session.distractionCount,
-      focusScore: clamp(focusScore, 0, 100),
-      distractionRatioPercentage,
-      totalDurationLabel: formatDurationLabel(totalDurationSeconds),
-      focusedDurationLabel: formatDurationLabel(focusTimeSeconds),
-      idleDurationLabel: formatDurationLabel(idleTimeSeconds),
+      reportEmailSentAt: session.reportEmailSentAt?.toISOString() || null,
+      reportEmailLastAttemptAt:
+        session.reportEmailLastAttemptAt?.toISOString() || null,
+      reportEmailLastError: session.reportEmailLastError,
+      reportEmailSendCount: session.reportEmailSendCount,
     },
-    activity: {
-      totalEvents: events.length,
-      breakdown: eventBreakdown,
-    },
-    distractions: {
-      totalEvents: distractions.length,
-      totalDurationSeconds: distractionDurationSeconds,
-      breakdown: distractionBreakdown,
-    },
-    quiz: {
-      attempted: quizAttempted,
-      totalAttempts: totalQuizAttempts,
-      averagePercentage: averageQuizPercentage,
-      bestPercentage: bestQuizPercentage,
-      weakAreas: aggregatedWeakAreas,
-      latestInsight: latestInsightWithActions
+    events: events.map((event) => ({
+      id: event.id,
+      eventType: event.eventType,
+      timestamp: event.timestamp.toISOString(),
+      eventData: event.eventData,
+    })),
+    distractions: distractions.map((distraction) => ({
+      id: distraction.id,
+      distractionType: distraction.distractionType,
+      durationSeconds: distraction.durationSeconds,
+      timestamp: distraction.timestamp.toISOString(),
+      metadata: distraction.metadata,
+    })),
+    quizAttempts: quizAttempts.map((attempt) => ({
+      attemptId: attempt.id,
+      quizId: attempt.quizId,
+      quizTitle: attempt.quiz.title,
+      difficulty: attempt.quiz.difficulty,
+      score: attempt.score,
+      totalQuestions: attempt.totalQuestions,
+      correctAnswers: attempt.correctAnswers,
+      percentage: attempt.percentage,
+      submittedAt: attempt.createdAt.toISOString(),
+      answers: attempt.answers.map((answer) => {
+        const options = parseStringList(
+          answer.question.options as Prisma.JsonValue,
+        );
+
+        return {
+          questionId: answer.questionId,
+          questionText: answer.question.questionText,
+          selectedOptionIndex: answer.selectedOptionIndex,
+          selectedOption: options[answer.selectedOptionIndex] || "",
+          correctOptionIndex: answer.question.correctOptionIndex,
+          correctOption: options[answer.question.correctOptionIndex] || "",
+          isCorrect: answer.isCorrect,
+          explanation: answer.question.explanation,
+        };
+      }),
+      insight: attempt.insight
         ? {
-            id: latestInsightWithActions.id,
-            strengths: latestInsightWithActions.strengths,
-            weaknesses: latestInsightWithActions.weaknesses,
-            weakAreas: parseStringList(latestInsightWithActions.weakAreas),
-            recommendedActions: latestRecommendedActions,
-            createdAt: latestInsightWithActions.createdAt,
+            id: attempt.insight.id,
+            strengths: attempt.insight.strengths,
+            weaknesses: attempt.insight.weaknesses,
+            weakAreas: parseStringList(attempt.insight.weakAreas),
+            detailedInsights: attempt.insight.detailedInsights,
+            recommendedActions: attempt.insight.recommendedActions,
+            createdAt: attempt.insight.createdAt.toISOString(),
           }
         : null,
-      attempts: quizAttempts.map((attempt) => ({
-        attemptId: attempt.id,
-        quizId: attempt.quizId,
-        quizTitle: attempt.quiz.title,
-        difficulty: attempt.quiz.difficulty,
-        score: attempt.score,
-        totalQuestions: attempt.totalQuestions,
-        correctAnswers: attempt.correctAnswers,
-        percentage: attempt.percentage,
-        submittedAt: attempt.createdAt,
-        insight: attempt.insight
-          ? {
-              id: attempt.insight.id,
-              weakAreas: parseStringList(attempt.insight.weakAreas),
-              strengths: attempt.insight.strengths,
-              weaknesses: attempt.insight.weaknesses,
-            }
-          : null,
-      })),
-    },
-    improvement,
-    emailDelivery: {
-      sentAt: session.reportEmailSentAt,
-      lastAttemptAt: session.reportEmailLastAttemptAt,
-      lastError: session.reportEmailLastError,
-      sendCount: session.reportEmailSendCount,
-    },
+    })),
   };
+
+  return generateStudySessionReport(reportPayload);
 }
