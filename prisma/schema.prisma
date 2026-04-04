@@ -24,6 +24,7 @@ model User {
   quizInsights   QuizInsight[]
   flashcardSets  FlashcardSet[]
   studySessions  StudySession[]
+  documentChatThreads DocumentChatThread[]
 
   @@map("users")
 }
@@ -59,6 +60,7 @@ model File {
   quizzes          Quiz[]
   flashcardSets    FlashcardSet[]
   studySessions    StudySession[]
+  documentChatThreads DocumentChatThread[]
 
   @@map("files")
 }
@@ -173,6 +175,11 @@ enum DistractionType {
   INACTIVITY_TIMEOUT
   APP_BACKGROUND
   OTHER
+}
+
+enum DocumentChatRole {
+  USER
+  ASSISTANT
 }
 
 model Quiz {
@@ -369,6 +376,45 @@ model DistractionEvent {
   @@index([distractionType])
   @@index([timestamp])
   @@map("distraction_events")
+}
+
+model DocumentChatThread {
+  id            String                @id @default(uuid())
+  fileId        String
+  file          File                  @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  lastMessageAt DateTime              @default(now())
+  messages      DocumentChatMessage[]
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  @@index([fileId, userId, updatedAt])
+  @@index([userId, lastMessageAt])
+  @@map("document_chat_threads")
+}
+
+model DocumentChatMessage {
+  id                   String            @id @default(uuid())
+  threadId             String
+  thread               DocumentChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  role                 DocumentChatRole
+  content              String            @db.Text
+  groundedInDocument   Boolean           @default(false)
+  usedGeneralKnowledge Boolean           @default(false)
+  citations            Json?
+  followUpQuestions    Json?
+  modelUsed            String?
+  promptTokens         Int?
+  completionTokens     Int?
+  totalTokens          Int?
+  retrievalQuery       String?           @db.Text
+  createdAt            DateTime          @default(now())
+
+  @@index([threadId, createdAt])
+  @@index([role])
+  @@map("document_chat_messages")
 }
 
 // --- TEMPORARY: to resolve drift ---

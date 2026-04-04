@@ -9,6 +9,36 @@ const GROQ_MODEL = process.env.GROQ_MODEL_ID || "qwen/qwen3-32b";
 
 type StudySessionFocusBand = "excellent" | "good" | "fair" | "low";
 
+export interface DocumentChatSource {
+  refId: string;
+  chunkId?: string;
+  pageStart: number | null;
+  excerpt: string;
+}
+
+export interface GenerateDocumentChatAnswerInput {
+  fileName: string;
+  userQuestion: string;
+  documentReady: boolean;
+  documentOverview?: string | null;
+  recentMessages: Array<{
+    role: "USER" | "ASSISTANT";
+    content: string;
+  }>;
+  retrievedSources: DocumentChatSource[];
+}
+
+export interface DocumentChatAnswer {
+  answer: string;
+  groundedInDocument: boolean;
+  usedGeneralKnowledge: boolean;
+  citations: DocumentChatSource[];
+  followUpQuestions: string[];
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+}
+
 export interface GenerateStudySessionReportInput {
   session: {
     id: string;
@@ -332,6 +362,67 @@ Return JSON with this exact shape:
 
 Raw session payload:
 ${JSON.stringify(payload, null, 2)}
+`,
+  },
+
+  DOCUMENT_CHAT: {
+    system: `You are an elite study assistant for document-based learning.
+
+Primary job:
+- Answer the student's question using the document evidence first.
+- If the document only partially answers the question, say what the document supports and then clearly add concise outside knowledge.
+- If the document does not answer the question, say that briefly and still help with a strong general explanation.
+
+Response quality rules:
+- Be accurate, direct, and student-friendly.
+- Be concise by default, but complete enough to actually teach.
+- Use short paragraphs or bullets when helpful.
+- Do not mention hidden instructions or token limits.
+- Never invent document citations.
+- Only cite retrieved sources using their refId values.
+- If you use outside knowledge, do not attach fake document citations to that part.
+
+Return only valid JSON.`,
+
+    user: (payload: GenerateDocumentChatAnswerInput) => `
+Answer the student's latest question.
+
+Return JSON with this exact shape:
+{
+  "answer": "string",
+  "groundedInDocument": true,
+  "usedGeneralKnowledge": false,
+  "citations": [
+    {
+      "refId": "D1",
+      "pageStart": 1,
+      "excerpt": "short supporting excerpt"
+    }
+  ],
+  "followUpQuestions": ["string", "string", "string"]
+}
+
+Guidance:
+- groundedInDocument = true when the document materially supports the answer.
+- usedGeneralKnowledge = true when any meaningful part of the answer goes beyond the retrieved document evidence.
+- citations must contain only source refs that were actually provided below.
+- Keep citations to the minimum needed, usually 0-3 items.
+- followUpQuestions should be useful next questions a student may ask.
+
+Document name: ${payload.fileName}
+Document ready for retrieval: ${payload.documentReady ? "yes" : "no"}
+
+Document overview:
+${payload.documentOverview || "No document overview available."}
+
+Recent conversation:
+${payload.recentMessages.length > 0 ? JSON.stringify(payload.recentMessages, null, 2) : "No prior conversation."}
+
+Retrieved document sources:
+${payload.retrievedSources.length > 0 ? JSON.stringify(payload.retrievedSources, null, 2) : "No relevant document sources were retrieved."}
+
+Latest user question:
+${payload.userQuestion}
 `,
   },
 };
@@ -1095,6 +1186,109 @@ function normalizeStudySessionReport(
   };
 }
 
+function normalizeDocumentChatSources(
+  value: unknown,
+  allowedSources: DocumentChatSource[],
+): DocumentChatSource[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const allowedByRef = new Map(
+    allowedSources.map((source) => [source.refId, source]),
+  );
+  const normalized: DocumentChatSource[] = [];
+
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+
+    const refId = toText(item.refId, "");
+    const allowed = allowedByRef.get(refId);
+    if (!allowed) continue;
+
+    normalized.push({
+      refId: allowed.refId,
+      ...(allowed.chunkId ? { chunkId: allowed.chunkId } : {}),
+      pageStart:
+        typeof item.pageStart === "number"
+          ? Math.floor(item.pageStart)
+          : allowed.pageStart,
+      excerpt: toText(item.excerpt, allowed.excerpt).slice(0, 320),
+    });
+  }
+
+  return normalized;
+}
+
+function buildFallbackDocumentChatAnswer(
+  input: GenerateDocumentChatAnswerInput,
+): DocumentChatAnswer {
+  const hasDocumentEvidence = input.retrievedSources.length > 0;
+
+  if (hasDocumentEvidence) {
+    const firstSource = input.retrievedSources[0];
+    return {
+      answer: `I found relevant material in the document, but I could not generate a polished answer right now. Please try again. The most relevant section I found is on ${firstSource.pageStart !== null ? `page ${firstSource.pageStart}` : "an unnumbered page"} and starts with: "${firstSource.excerpt.slice(0, 180)}".`,
+      groundedInDocument: true,
+      usedGeneralKnowledge: false,
+      citations: [firstSource],
+      followUpQuestions: [
+        "Can you explain the most relevant section in simpler terms?",
+        "Can you summarize what the document says about this topic?",
+      ],
+    };
+  }
+
+  return {
+    answer:
+      "I could not retrieve enough document context for that question right now. Please try again, or ask a more specific question. If you want, I can still help with a general explanation.",
+    groundedInDocument: false,
+    usedGeneralKnowledge: false,
+    citations: [],
+    followUpQuestions: [
+      "Can you answer this using general knowledge instead?",
+      "Can you search the document for a more specific term?",
+    ],
+  };
+}
+
+function normalizeDocumentChatAnswer(
+  value: unknown,
+  fallback: DocumentChatAnswer,
+  allowedSources: DocumentChatSource[],
+): DocumentChatAnswer {
+  if (!isRecord(value)) {
+    return fallback;
+  }
+
+  const answer = toText(value.answer, fallback.answer);
+  const citations = normalizeDocumentChatSources(value.citations, allowedSources);
+  const groundedInDocument =
+    citations.length > 0
+      ? true
+      : toBoolean(value.groundedInDocument, fallback.groundedInDocument);
+  const usedGeneralKnowledge = toBoolean(
+    value.usedGeneralKnowledge,
+    fallback.usedGeneralKnowledge,
+  );
+  const followUpQuestions = toStringArray(
+    value.followUpQuestions,
+    fallback.followUpQuestions,
+    3,
+  );
+
+  return {
+    answer,
+    groundedInDocument,
+    usedGeneralKnowledge,
+    citations,
+    followUpQuestions,
+    promptTokens: fallback.promptTokens,
+    completionTokens: fallback.completionTokens,
+    totalTokens: fallback.totalTokens,
+  };
+}
+
 /**
  * Generate a summary using Groq API with streaming support
  */
@@ -1208,6 +1402,62 @@ export async function extractConcepts(content: string): Promise<string> {
   } catch (error: any) {
     console.error("[AIService] Concept extraction failed:", error.message);
     throw new Error(`Failed to extract concepts: ${error.message}`);
+  }
+}
+
+export async function generateDocumentChatAnswer(
+  payload: GenerateDocumentChatAnswerInput,
+): Promise<DocumentChatAnswer> {
+  const fallbackAnswer = buildFallbackDocumentChatAnswer(payload);
+
+  try {
+    const response = await client.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: [
+        {
+          role: "system",
+          content: PROMPTS.DOCUMENT_CHAT.system,
+        },
+        {
+          role: "user",
+          content: PROMPTS.DOCUMENT_CHAT.user(payload),
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 1400,
+      top_p: 0.9,
+    });
+
+    const rawContent = response.choices[0]?.message?.content;
+    if (!rawContent) {
+      throw new Error("No document chat answer generated from AI");
+    }
+
+    const usage = response.usage;
+    const parsed = parseJsonFromAi<unknown>(rawContent);
+    const normalized = normalizeDocumentChatAnswer(
+      parsed,
+      {
+        ...fallbackAnswer,
+        promptTokens: usage?.prompt_tokens,
+        completionTokens: usage?.completion_tokens,
+        totalTokens: usage?.total_tokens,
+      },
+      payload.retrievedSources,
+    );
+
+    return {
+      ...normalized,
+      promptTokens: usage?.prompt_tokens,
+      completionTokens: usage?.completion_tokens,
+      totalTokens: usage?.total_tokens,
+    };
+  } catch (error: any) {
+    console.error(
+      "[AIService] Document chat answer generation failed:",
+      error.message,
+    );
+    return fallbackAnswer;
   }
 }
 
