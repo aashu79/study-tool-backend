@@ -23,6 +23,7 @@ model User {
   quizAttempts   QuizAttempt[]
   quizInsights   QuizInsight[]
   flashcardSets  FlashcardSet[]
+  studyPlans     StudyPlan[]
   studySessions  StudySession[]
   documentChatThreads DocumentChatThread[]
 
@@ -59,6 +60,7 @@ model File {
   summaries        Summary[]
   quizzes          Quiz[]
   flashcardSets    FlashcardSet[]
+  studyPlans       StudyPlan[]
   studySessions    StudySession[]
   documentChatThreads DocumentChatThread[]
 
@@ -133,6 +135,34 @@ model SummaryChunk {
   @@index([summaryId])
   @@index([chunkId])
   @@map("summary_chunks")
+}
+
+model StudyPlan {
+  id                    String   @id @default(uuid())
+  fileId                String
+  file                  File     @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title                 String
+  objective             String?  @db.Text
+  currentKnowledgeLevel String?
+  targetTimelineDays    Int?
+  studyHoursPerWeek     Int?
+  dailyStudyMinutes     Int?
+  specialInstruction    String?  @db.Text
+  overview              String   @db.Text
+  plan                  Json
+  estimatedTotalHours   Int?
+  estimatedWeeks        Int?
+  modelUsed             String   @default("qwen/qwen3-32b")
+  sourceWordCount       Int      @default(0)
+  sourceTokensUsed      Int      @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([fileId])
+  @@index([userId])
+  @@map("study_plans")
 }
 
 enum QuizDifficulty {

@@ -39,6 +39,57 @@ export interface DocumentChatAnswer {
   totalTokens?: number;
 }
 
+export interface GenerateStudyPlanInput {
+  fileName: string;
+  sourceContent: string;
+  objective?: string;
+  currentKnowledgeLevel?: string;
+  targetTimelineDays?: number;
+  studyHoursPerWeek?: number;
+  dailyStudyMinutes?: number;
+  specialInstruction?: string;
+}
+
+export interface StudyPlanStructure {
+  title: string;
+  overview: string;
+  difficultyLevel: string;
+  estimatedTotalHours: number;
+  estimatedWeeks: number;
+  prerequisites: Array<{
+    topic: string;
+    whyItMatters: string;
+    priority: "high" | "medium" | "low";
+  }>;
+  learningObjectives: string[];
+  focusAreas: Array<{
+    topic: string;
+    reason: string;
+    priority: "high" | "medium" | "low";
+  }>;
+  phases: Array<{
+    phaseNumber: number;
+    title: string;
+    goal: string;
+    duration: string;
+    topics: string[];
+    activities: string[];
+    checkpoints: string[];
+  }>;
+  weeklySchedule: Array<{
+    weekNumber: number;
+    primaryGoal: string;
+    studyTargets: string[];
+    practice: string[];
+    revision: string[];
+  }>;
+  revisionStrategy: string[];
+  practiceStrategy: string[];
+  warningAreas: string[];
+  successCriteria: string[];
+  nextSteps: string[];
+}
+
 export interface GenerateStudySessionReportInput {
   session: {
     id: string;
@@ -423,6 +474,93 @@ ${payload.retrievedSources.length > 0 ? JSON.stringify(payload.retrievedSources,
 
 Latest user question:
 ${payload.userQuestion}
+`,
+  },
+
+  STUDY_PLAN: {
+    system: `You are an elite academic study strategist.
+
+You create detailed, realistic, high-value study plans from educational documents.
+
+Your plan must help a student understand:
+- what background knowledge they need first
+- what topics deserve the most focus
+- what order to study in
+- how to practice and revise effectively
+- how to know they are actually ready
+
+Quality rules:
+- Be practical, specific, and student-friendly.
+- Keep the plan structured and actionable.
+- Avoid generic filler advice.
+- Base the plan on the supplied source content.
+- If the source content is advanced, make the prerequisites explicit.
+- If the user gives timeline or workload constraints, adapt the plan to them.
+
+Return only valid JSON.`,
+
+    user: (payload: GenerateStudyPlanInput) => `
+Create a detailed study plan for this document.
+
+Return JSON with this exact shape:
+{
+  "title": "string",
+  "overview": "string",
+  "difficultyLevel": "Beginner | Intermediate | Advanced",
+  "estimatedTotalHours": 0,
+  "estimatedWeeks": 0,
+  "prerequisites": [
+    {
+      "topic": "string",
+      "whyItMatters": "string",
+      "priority": "high"
+    }
+  ],
+  "learningObjectives": ["string"],
+  "focusAreas": [
+    {
+      "topic": "string",
+      "reason": "string",
+      "priority": "high"
+    }
+  ],
+  "phases": [
+    {
+      "phaseNumber": 1,
+      "title": "string",
+      "goal": "string",
+      "duration": "string",
+      "topics": ["string"],
+      "activities": ["string"],
+      "checkpoints": ["string"]
+    }
+  ],
+  "weeklySchedule": [
+    {
+      "weekNumber": 1,
+      "primaryGoal": "string",
+      "studyTargets": ["string"],
+      "practice": ["string"],
+      "revision": ["string"]
+    }
+  ],
+  "revisionStrategy": ["string"],
+  "practiceStrategy": ["string"],
+  "warningAreas": ["string"],
+  "successCriteria": ["string"],
+  "nextSteps": ["string"]
+}
+
+Document name: ${payload.fileName}
+Objective: ${payload.objective || "Master the document thoroughly"}
+Current knowledge level: ${payload.currentKnowledgeLevel || "Not specified"}
+Target timeline (days): ${payload.targetTimelineDays || "Not specified"}
+Study hours per week: ${payload.studyHoursPerWeek || "Not specified"}
+Daily study minutes: ${payload.dailyStudyMinutes || "Not specified"}
+Special instruction: ${payload.specialInstruction || "None"}
+
+Source content:
+${payload.sourceContent}
 `,
   },
 };
@@ -1186,6 +1324,321 @@ function normalizeStudySessionReport(
   };
 }
 
+function toPriority(
+  value: unknown,
+  fallback: "high" | "medium" | "low" = "medium",
+): "high" | "medium" | "low" {
+  const normalized = toText(value, fallback).toLowerCase();
+  if (normalized === "high" || normalized === "medium" || normalized === "low") {
+    return normalized;
+  }
+
+  return fallback;
+}
+
+function buildFallbackStudyPlan(
+  payload: GenerateStudyPlanInput,
+): StudyPlanStructure {
+  const objective = payload.objective || `Understand ${payload.fileName}`;
+  const estimatedWeeks =
+    typeof payload.targetTimelineDays === "number" &&
+    payload.targetTimelineDays > 0
+      ? Math.max(1, Math.ceil(payload.targetTimelineDays / 7))
+      : 4;
+  const estimatedTotalHours =
+    typeof payload.studyHoursPerWeek === "number" &&
+    payload.studyHoursPerWeek > 0
+      ? estimatedWeeks * payload.studyHoursPerWeek
+      : 16;
+
+  return {
+    title: `Study plan for ${payload.fileName}`,
+    overview:
+      "This study plan organizes the document into a structured sequence so the student can build prerequisites first, focus on high-impact topics, practice consistently, and track readiness with checkpoints.",
+    difficultyLevel: "Intermediate",
+    estimatedTotalHours,
+    estimatedWeeks,
+    prerequisites: [
+      {
+        topic: "Core background concepts mentioned in the document",
+        whyItMatters:
+          "Understanding the basic terminology first will make the later sections easier to absorb.",
+        priority: "high",
+      },
+    ],
+    learningObjectives: [
+      `Build a solid working understanding of the document's main ideas`,
+      "Identify the most important concepts, processes, or frameworks",
+      "Be able to explain the material clearly and apply it in practice",
+    ],
+    focusAreas: [
+      {
+        topic: "Foundational concepts",
+        reason: "They support the rest of the material.",
+        priority: "high",
+      },
+      {
+        topic: "Complex or easily confused sections",
+        reason: "These areas usually create the most mistakes later.",
+        priority: "high",
+      },
+      {
+        topic: "Application and revision",
+        reason: "Practice improves retention and exam readiness.",
+        priority: "medium",
+      },
+    ],
+    phases: [
+      {
+        phaseNumber: 1,
+        title: "Build the foundation",
+        goal: "Understand core terms, scope, and structure of the document.",
+        duration: "Week 1",
+        topics: ["Introductory concepts", "Key terms", "Basic structure"],
+        activities: [
+          "Read the document once for orientation",
+          "Create short notes for definitions and major headings",
+          "List unclear concepts for follow-up review",
+        ],
+        checkpoints: [
+          "Can explain the main purpose of the document in simple words",
+          "Can define the most important terms without looking",
+        ],
+      },
+      {
+        phaseNumber: 2,
+        title: "Deep study",
+        goal: `Work through the main body of the content and align study with the objective: ${objective}.`,
+        duration: "Weeks 2-3",
+        topics: ["Main concepts", "Processes", "Examples or applications"],
+        activities: [
+          "Study each major section in order",
+          "Summarize each section in your own words",
+          "Practice with short self-tests after each topic",
+        ],
+        checkpoints: [
+          "Can compare similar concepts accurately",
+          "Can solve or explain basic application questions",
+        ],
+      },
+      {
+        phaseNumber: 3,
+        title: "Revision and readiness",
+        goal: "Consolidate weak areas and confirm retention.",
+        duration: `Week ${estimatedWeeks}`,
+        topics: ["Weak areas", "Review", "Active recall"],
+        activities: [
+          "Review mistakes and hard sections",
+          "Use active recall and spaced repetition",
+          "Attempt a mock explanation or practice set",
+        ],
+        checkpoints: [
+          "Can recall the most important ideas from memory",
+          "Can identify remaining weak areas and fix them quickly",
+        ],
+      },
+    ],
+    weeklySchedule: Array.from({ length: estimatedWeeks }, (_, index) => ({
+      weekNumber: index + 1,
+      primaryGoal:
+        index === 0
+          ? "Lay the foundation"
+          : index === estimatedWeeks - 1
+            ? "Revise and test readiness"
+            : "Deepen understanding and practice",
+      studyTargets:
+        index === 0
+          ? ["Read the core sections", "Map key concepts"]
+          : index === estimatedWeeks - 1
+            ? ["Revisit weak areas", "Do active recall"]
+            : ["Study one major theme at a time", "Write concise notes"],
+      practice: [
+        "Create short questions from the material",
+        "Check understanding with self-explanation",
+      ],
+      revision: [
+        "Review previous notes before starting new material",
+        "Track one weak area to improve each week",
+      ],
+    })),
+    revisionStrategy: [
+      "Review old material before moving fully into new sections.",
+      "Use spaced repetition for terms, formulas, and key relationships.",
+      "Spend extra time on sections that are easy to confuse.",
+    ],
+    practiceStrategy: [
+      "Use active recall instead of passive rereading.",
+      "Turn headings and examples into short test questions.",
+      "Explain concepts aloud in your own words.",
+    ],
+    warningAreas: [
+      "Do not skip prerequisites if later sections depend on them.",
+      "Do not only reread; include recall and application practice.",
+      "Watch for sections that seem familiar but are hard to explain clearly.",
+    ],
+    successCriteria: [
+      "Can summarize the document accurately without looking at it.",
+      "Can answer topic-based questions with confidence.",
+      "Can identify and correct weak areas independently.",
+    ],
+    nextSteps: [
+      "Start by reviewing the core concepts and document structure.",
+      "Build a study schedule based on the phase sequence.",
+      "Track weak areas after each session and revise them weekly.",
+    ],
+  };
+}
+
+function normalizeStudyPlan(
+  value: unknown,
+  fallback: StudyPlanStructure,
+): StudyPlanStructure {
+  if (!isRecord(value)) {
+    return fallback;
+  }
+
+  const prerequisites = Array.isArray(value.prerequisites)
+    ? value.prerequisites
+        .map((item) => {
+          if (!isRecord(item)) return null;
+
+          return {
+            topic: toText(item.topic, ""),
+            whyItMatters: toText(item.whyItMatters, ""),
+            priority: toPriority(item.priority, "medium"),
+          };
+        })
+        .filter(
+          (
+            item,
+          ): item is {
+            topic: string;
+            whyItMatters: string;
+            priority: "high" | "medium" | "low";
+          } => Boolean(item?.topic && item?.whyItMatters),
+        )
+    : fallback.prerequisites;
+
+  const focusAreas = Array.isArray(value.focusAreas)
+    ? value.focusAreas
+        .map((item) => {
+          if (!isRecord(item)) return null;
+
+          return {
+            topic: toText(item.topic, ""),
+            reason: toText(item.reason, ""),
+            priority: toPriority(item.priority, "medium"),
+          };
+        })
+        .filter(
+          (
+            item,
+          ): item is {
+            topic: string;
+            reason: string;
+            priority: "high" | "medium" | "low";
+          } => Boolean(item?.topic && item?.reason),
+        )
+    : fallback.focusAreas;
+
+  const phases = Array.isArray(value.phases)
+    ? value.phases
+        .map((item, index) => {
+          if (!isRecord(item)) return null;
+
+          return {
+            phaseNumber: toNonNegativeInteger(item.phaseNumber, index + 1) || index + 1,
+            title: toText(item.title, ""),
+            goal: toText(item.goal, ""),
+            duration: toText(item.duration, ""),
+            topics: toStringArray(item.topics, [], 10),
+            activities: toStringArray(item.activities, [], 10),
+            checkpoints: toStringArray(item.checkpoints, [], 10),
+          };
+        })
+        .filter(
+          (
+            item,
+          ): item is {
+            phaseNumber: number;
+            title: string;
+            goal: string;
+            duration: string;
+            topics: string[];
+            activities: string[];
+            checkpoints: string[];
+          } => Boolean(item?.title && item?.goal),
+        )
+    : fallback.phases;
+
+  const weeklySchedule = Array.isArray(value.weeklySchedule)
+    ? value.weeklySchedule
+        .map((item, index) => {
+          if (!isRecord(item)) return null;
+
+          return {
+            weekNumber: toNonNegativeInteger(item.weekNumber, index + 1) || index + 1,
+            primaryGoal: toText(item.primaryGoal, ""),
+            studyTargets: toStringArray(item.studyTargets, [], 8),
+            practice: toStringArray(item.practice, [], 8),
+            revision: toStringArray(item.revision, [], 8),
+          };
+        })
+        .filter(
+          (
+            item,
+          ): item is {
+            weekNumber: number;
+            primaryGoal: string;
+            studyTargets: string[];
+            practice: string[];
+            revision: string[];
+          } => Boolean(item?.primaryGoal),
+        )
+    : fallback.weeklySchedule;
+
+  return {
+    title: toText(value.title, fallback.title),
+    overview: toText(value.overview, fallback.overview),
+    difficultyLevel: toText(value.difficultyLevel, fallback.difficultyLevel),
+    estimatedTotalHours: toNonNegativeInteger(
+      value.estimatedTotalHours,
+      fallback.estimatedTotalHours,
+    ),
+    estimatedWeeks: Math.max(
+      1,
+      toNonNegativeInteger(value.estimatedWeeks, fallback.estimatedWeeks),
+    ),
+    prerequisites: prerequisites.length > 0 ? prerequisites : fallback.prerequisites,
+    learningObjectives: toStringArray(
+      value.learningObjectives,
+      fallback.learningObjectives,
+      12,
+    ),
+    focusAreas: focusAreas.length > 0 ? focusAreas : fallback.focusAreas,
+    phases: phases.length > 0 ? phases : fallback.phases,
+    weeklySchedule:
+      weeklySchedule.length > 0 ? weeklySchedule : fallback.weeklySchedule,
+    revisionStrategy: toStringArray(
+      value.revisionStrategy,
+      fallback.revisionStrategy,
+      10,
+    ),
+    practiceStrategy: toStringArray(
+      value.practiceStrategy,
+      fallback.practiceStrategy,
+      10,
+    ),
+    warningAreas: toStringArray(value.warningAreas, fallback.warningAreas, 10),
+    successCriteria: toStringArray(
+      value.successCriteria,
+      fallback.successCriteria,
+      10,
+    ),
+    nextSteps: toStringArray(value.nextSteps, fallback.nextSteps, 10),
+  };
+}
+
 function normalizeDocumentChatSources(
   value: unknown,
   allowedSources: DocumentChatSource[],
@@ -1458,6 +1911,42 @@ export async function generateDocumentChatAnswer(
       error.message,
     );
     return fallbackAnswer;
+  }
+}
+
+export async function generateStudyPlan(
+  payload: GenerateStudyPlanInput,
+): Promise<StudyPlanStructure> {
+  const fallbackPlan = buildFallbackStudyPlan(payload);
+
+  try {
+    const response = await client.chat.completions.create({
+      model: GROQ_MODEL,
+      messages: [
+        {
+          role: "system",
+          content: PROMPTS.STUDY_PLAN.system,
+        },
+        {
+          role: "user",
+          content: PROMPTS.STUDY_PLAN.user(payload),
+        },
+      ],
+      temperature: 0.3,
+      max_tokens: 3200,
+      top_p: 0.9,
+    });
+
+    const rawContent = response.choices[0]?.message?.content;
+    if (!rawContent) {
+      throw new Error("No study plan generated from AI");
+    }
+
+    const parsed = parseJsonFromAi<unknown>(rawContent);
+    return normalizeStudyPlan(parsed, fallbackPlan);
+  } catch (error: any) {
+    console.error("[AIService] Study plan generation failed:", error.message);
+    return fallbackPlan;
   }
 }
 
