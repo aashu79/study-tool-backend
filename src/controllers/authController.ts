@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import * as authService from "../services/authService";
-import { uploadProfileImage } from "../services/minioService";
+import { uploadProfileImage } from "../services/r2Service";
 
 // Forgot Password: send reset link or OTP
 export async function forgotPassword(req: Request, res: Response) {

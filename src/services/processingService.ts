@@ -1,6 +1,6 @@
 import prisma from "../lib/prismaClient";
 import axios from "axios";
-import { USER_FILES_BUCKET } from "./minioService";
+import { USER_FILES_BUCKET } from "./r2Service";
 
 const WORKER_BASE_URL = process.env.WORKER_BASE_URL || "http://localhost:8000";
 

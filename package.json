@@ -16,6 +16,8 @@
     "generate": "prisma generate"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1030.0",
+    "@aws-sdk/s3-request-presigner": "^3.1030.0",
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
     "axios": "^1.7.2",
@@ -24,7 +26,6 @@
     "express": "^5.2.1",
     "express-validator": "^7.3.1",
     "jsonwebtoken": "^9.0.3",
-    "minio": "^8.0.6",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.12",
     "openai": "^4.77.3",

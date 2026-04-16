@@ -1,13 +1,13 @@
 import prisma from "../lib/prismaClient";
 import {
-  uploadProfileImage,
-  uploadUserFile,
-  getSignedUrl,
-  getDownloadUrl,
-  deleteFromMinIO,
   PROFILE_BUCKET,
   USER_FILES_BUCKET,
-} from "./minioService";
+  deleteFromR2,
+  getDownloadUrl,
+  getSignedUrl,
+  uploadProfileImage,
+  uploadUserFile,
+} from "./r2Service";
 import { enqueueFileIngestion, FileIngestionJob } from "./queueService";
 import { v4 as uuidv4 } from "uuid";
 
@@ -24,7 +24,7 @@ export async function saveProfilePicture(
 }
 
 export async function saveUserFile(userId: string, file: Express.Multer.File) {
-  // Upload file to MinIO
+  // Upload file to Cloudflare R2
   const key = await uploadUserFile(userId, file);
 
   // Create file record in database
@@ -143,8 +143,8 @@ export async function deleteUserFile(fileId: string, userId: string) {
   const file = await prisma.file.findUnique({ where: { id: fileId } });
   if (!file || file.userId !== userId)
     throw new Error("File not found or not owned by user");
-  // Delete from MinIO
-  await deleteFromMinIO(USER_FILES_BUCKET, file.key);
+  // Delete from Cloudflare R2
+  await deleteFromR2(USER_FILES_BUCKET, file.key);
   // Delete from DB
   await prisma.file.delete({ where: { id: fileId } });
 }
