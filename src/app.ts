@@ -8,6 +8,7 @@ import flashcardRoutes from "./routes/flashcard.routes";
 import studySessionRoutes from "./routes/studySession.routes";
 import documentChatRoutes from "./routes/documentChat.routes";
 import studyPlanRoutes from "./routes/studyPlan.routes";
+import dashboardRoutes from "./routes/dashboard.routes";
 
 import { errorHandler } from "./middleware/errorHandler.middleware";
 import dotenv from "dotenv";
@@ -56,6 +57,7 @@ app.use("/api/flashcards", flashcardRoutes);
 app.use("/api/study-sessions", studySessionRoutes);
 app.use("/api/document-chat", documentChatRoutes);
 app.use("/api/study-plans", studyPlanRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
 // 404 handler for all unmatched routes
 app.use((req, res, next) => {
